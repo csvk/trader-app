@@ -1,11 +1,13 @@
 import requests
 import pandas as pd
 import json
-import constants.defs as defs
-from api.api_creds import ApiCreds
 
 from dateutil import parser
 from datetime import datetime as dt
+import os, time
+
+import constants.defs as defs
+from api.api_creds import ApiCreds
 from api.api_price import ApiPrice
 from api.open_trade import OpenTrade
 
@@ -74,20 +76,35 @@ class OandaApi:
         return self.get_account_ep("instruments", "instruments")
     
     def download_account_instruments(self):
-        attempts = 0
-        while attempts < 3:
-            ok, data = self.get_account_instruments()
-            if ok == True and data is not None:
-                break
-            attempts += 1
+        # Download file if last downloaded more than a day ago
+        download = False
+        file = f"{self.PATH}/{self.INSTR_FILE}"
+        if os.path.exists(file):
+            current_time = time.time()
+            modification_time = os.path.getmtime(file)
+            file_age = current_time - modification_time
+            # Convert the age to a readable format (e.g., days)
+            file_age_days = file_age / (24 * 3600)
 
-        if data is not None and len(data) != 0:
-            self.instruments = {d['name']: d for d in data['instruments']}
-            file = f"{self.PATH}/{self.INSTR_FILE}"
-            with open(file, "w") as f:
-                f.write(json.dumps(self.instruments, indent=2))
+            if file_age_days > 1:
+                download = True
         else:
-            raise 'Instruments download error'
+            download = True
+
+        if download:
+            attempts = 0
+            while attempts < 3:
+                ok, data = self.get_account_instruments()
+                if ok == True and data is not None:
+                    break
+                attempts += 1
+
+            if data is not None and len(data) != 0:
+                self.instruments = {d['name']: d for d in data['instruments']}
+                with open(file, "w") as f:
+                    f.write(json.dumps(self.instruments, indent=2))
+            else:
+                raise 'Instruments download error'
         
     def get_instrument_settings(self, instruments):
         return {i: self.instruments[i] for i in instruments}
@@ -167,7 +184,8 @@ class OandaApi:
             return False, None
         
     def web_api_candles(self, pair_name, granularity, count):
-        df = self.get_candles_df(pair_name, granularity=granularity, count=count)
+        ok, df = self.get_candles_df(pair_name, granularity=granularity, count=count)
+        
         if df.shape[0] == 0:
             return None
 
@@ -198,6 +216,7 @@ class OandaApi:
             return False, None
         
     def place_take_profit_order(self, instrument, units):
+        # need update
 
         url = f"accounts/{ApiCreds.ACCOUNT_ID}/orders"
 
@@ -215,8 +234,6 @@ class OandaApi:
             return ok, response['orderFillTransaction']
         else:
             return False, None
-        
-    
 
     def place_trade(self, instrument: dict, units: float, direction: int,
                         stop_loss: float=None, take_profit: float=None):
